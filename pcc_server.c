@@ -8,7 +8,7 @@
 #include <signal.h>
 
 
-int pcc_total[126];
+uint64_t pcc_statistics[126];
 int connection = -1;
 int has_recieved_sigint = 0;
 int const mb = 1048576;
@@ -27,7 +27,7 @@ int write_or_read_error(int num){
 
 void print_printable_chars(){
     for(int i = 32; i < 126; i++)
-        printf("char '%c' : %u times\n", i, pcc_total[i]);
+        printf("char '%c' : %u times\n", i, pcc_statistics[i]);
     exit(0);
 }
 
@@ -48,31 +48,44 @@ int update_statistics(char * data_buff, int file_size){
             b = (int) data_buff[i];
             if(b >= 32 && b <= 126){
                 count++;
-                pcc_total[b]++;
+                pcc_statistics[b]++;
             }
         }
     }
 
     return count;
 }
-
-void handleConnection(int fd){
-    //read file_size from client
-    uint64_t num_read_from_client;
-    char * file_size_str = (char *)&num_read_from_client;
+void read_file_size_from_client(int fd,char ** buffer){
     int curr_read;
     int read_so_far = 0;
     while(sizeof(uint64_t) > read_so_far){
-        curr_read = read(fd, file_size_str + read_so_far, sizeof(uint64_t) - read_so_far);
+        curr_read = read(fd, *buffer + read_so_far, sizeof(uint64_t) - read_so_far);
         if(write_or_read_error(curr_read)) { return; }
         read_so_far += curr_read;
     }
-    int file_size = ntohl(num_read_from_client);
+}
+void send_to_client(int fd, char ** buffer_ptr){
+    int sent = 0;
+    int sent_this_iteration;
+    while( sizeof(uint64_t) > sent )
+    {
+        sent_this_iteration = write(fd, *buffer_ptr + sent, sizeof(uint64_t) - sent);
+        if(write_or_read_error(sent_this_iteration)){ return; }
+        if(sent_this_iteration < 0){ perror("write of file size to socket failed\n"); exit(-1); }
+        sent  += sent_this_iteration;
+    }
+}
 
+void handle_request(int fd){
+    //read file_size from client
+    uint64_t num_read_from_client;
+    char * file_size_str = (char *)&num_read_from_client;
+    read_file_size_from_client(fd,&file_size_str);
+    int file_size = ntohl(num_read_from_client);
     //read file data from client
     char * data_buff = malloc(mb);
-
-
+    int read_so_far = 0;
+    int curr_read = 0;
     int totally_read_from_file = 0;
     int count_of_printable_chars = 0;
     int curr_count_of_printable_chars = 0 ;
@@ -92,23 +105,21 @@ void handleConnection(int fd){
 
 
     char * count_of_printable_chars_buff = (char *)&count_of_printable_chars;
-    int sent = 0;
-    int sent_this_iteration;
-    while( sizeof(uint64_t) > sent )
-    {
-        sent_this_iteration = write(fd, count_of_printable_chars_buff + sent, sizeof(uint64_t) - sent);
-        if(write_or_read_error(sent_this_iteration)){ return; }
-        if(sent_this_iteration < 0){ perror("write of file size to socket failed\n"); exit(-1); }
-        sent  += sent_this_iteration;
-    }
+    send_to_client(fd,&count_of_printable_chars_buff);
 }
-
+void init_server_address(struct sockaddr_in *serv_addr,int *listen_socket, short port){
+    *listen_socket = socket( AF_INET, SOCK_STREAM, 0 );
+    memset( serv_addr, 0, sizeof(*serv_addr));
+    serv_addr -> sin_addr.s_addr = htonl(INADDR_ANY);
+    serv_addr -> sin_port = htons(port);
+    serv_addr -> sin_family = AF_INET;
+}
 int main(int argc, char *argv[])
 {
     if(argc != 2){ printf("wrong argument count!\n"); exit(-1); }
-    memset(&pcc_total, 0, sizeof(pcc_total));
-
-    struct sigaction sigint; //pretty much copied from HW 2
+    memset(&pcc_statistics, 0, sizeof(pcc_statistics));
+    //used my hw 3 as a refrence
+    struct sigaction sigint;
     sigint.sa_handler = &handler;
     sigemptyset(&sigint.sa_mask);
     sigint.sa_flags = SA_RESTART;
@@ -118,31 +129,33 @@ int main(int argc, char *argv[])
     }
 
     int rt = 1;
-    int listenfd  = -1;
+    int listen_socket  = -1;
     short port = atoi(argv[1]);
 
     struct sockaddr_in serv_addr;
-    struct sockaddr_in peer_addr;
+    struct sockaddr_in client_addr;
     socklen_t addrsize = sizeof(struct sockaddr_in );
+/*    socklen_t addrsize = sizeof(struct sockaddr_in );
 
-    listenfd = socket( AF_INET, SOCK_STREAM, 0 );
+    listen_socket = socket(AF_INET, SOCK_STREAM, 0 );
     memset( &serv_addr, 0, addrsize );
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     serv_addr.sin_port = htons(port);
+*/
+    init_server_address(&serv_addr,&listen_socket,port);
 
-
-    if(setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &rt, sizeof(int)) < 0){
+    if(setsockopt(listen_socket, SOL_SOCKET, SO_REUSEADDR, &rt, sizeof(int)) < 0){
         fprintf(stderr, "setsockopt Error: %s\n", strerror(errno));
         exit(1);
     }
 
 
-    if(0 != bind(listenfd, (struct sockaddr*) &serv_addr, addrsize))
+    if(0 != bind(listen_socket, (struct sockaddr*) &serv_addr, addrsize))
     { printf("\n Error : Bind Failed. %s \n", strerror(errno)); return 1; }
 
-    if(0 != listen(listenfd, 10))
+    if(0 != listen(listen_socket, 10))
     { printf("\n Error : Listen Failed. %s \n", strerror(errno)); return 1; }
 
     while( 1 )
@@ -151,10 +164,10 @@ int main(int argc, char *argv[])
             print_printable_chars();
 
         // Accept a connection.
-        connection = accept(listenfd, (struct sockaddr*) &peer_addr, &addrsize);
+        connection = accept(listen_socket, (struct sockaddr*) &client_addr, &addrsize);
         if(connection < 0) { printf("Accept Failed. %s \n", strerror(errno)); return 1; }
 
-        handleConnection(connection);
+        handle_request(connection);
 
         // close socket
         close(connection);

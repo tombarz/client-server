@@ -1,3 +1,4 @@
+#define  _DEFAULT_SOURCE
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -6,6 +7,7 @@
 #include <errno.h>
 #include <string.h>
 #include <signal.h>
+#include <endian.h>
 
 
 uint64_t pcc_statistics[126];
@@ -27,7 +29,7 @@ int write_or_read_error(int num){
 
 void print_printable_chars(){
     for(int i = 32; i < 126; i++)
-        printf("char '%c' : %u times\n", i, pcc_statistics[i]);
+        printf("char '%c' : %lu times\n", i, pcc_statistics[i]);
     exit(0);
 }
 
@@ -40,8 +42,8 @@ void handler(){
     }
 }
 
-int update_statistics(char * data_buff, int file_size){
-    int count = 0;
+uint64_t update_statistics(char * data_buff, int file_size){
+    uint64_t count = 0;
     int b;
     for(int i = 0; i < file_size; i++){
         if(!has_recieved_sigint){
@@ -81,14 +83,14 @@ void handle_request(int fd){
     uint64_t num_read_from_client;
     char * file_size_str = (char *)&num_read_from_client;
     read_file_size_from_client(fd,&file_size_str);
-    int file_size = ntohl(num_read_from_client);
+    int file_size = be64toh(num_read_from_client);
     //read file data from client
     char * data_buff = malloc(mb);
     int read_so_far = 0;
     int curr_read = 0;
     int totally_read_from_file = 0;
-    int count_of_printable_chars = 0;
-    int curr_count_of_printable_chars = 0 ;
+    uint64_t count_of_printable_chars = 0;
+    uint64_t curr_count_of_printable_chars = 0 ;
     while (file_size > totally_read_from_file){
         read_so_far = 0;
         while(mb > read_so_far){
@@ -96,14 +98,15 @@ void handle_request(int fd){
             if(write_or_read_error(curr_read)){ return; }
             read_so_far += curr_read;
         }
-        curr_count_of_printable_chars = htonl(update_statistics(data_buff, mb));
+
+        curr_count_of_printable_chars = update_statistics(data_buff, mb);
         count_of_printable_chars += curr_count_of_printable_chars;
         totally_read_from_file += read_so_far;
     }
 
 
 
-
+    count_of_printable_chars = htobe64(count_of_printable_chars);
     char * count_of_printable_chars_buff = (char *)&count_of_printable_chars;
     send_to_client(fd,&count_of_printable_chars_buff);
 }
@@ -118,7 +121,7 @@ int main(int argc, char *argv[])
 {
     if(argc != 2){ printf("wrong argument count!\n"); exit(-1); }
     memset(&pcc_statistics, 0, sizeof(pcc_statistics));
-    //used my hw 3 as a refrence
+    //used my hw 2 as a refrence
     struct sigaction sigint;
     sigint.sa_handler = &handler;
     sigemptyset(&sigint.sa_mask);
@@ -135,15 +138,6 @@ int main(int argc, char *argv[])
     struct sockaddr_in serv_addr;
     struct sockaddr_in client_addr;
     socklen_t addrsize = sizeof(struct sockaddr_in );
-/*    socklen_t addrsize = sizeof(struct sockaddr_in );
-
-    listen_socket = socket(AF_INET, SOCK_STREAM, 0 );
-    memset( &serv_addr, 0, addrsize );
-
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    serv_addr.sin_port = htons(port);
-*/
     init_server_address(&serv_addr,&listen_socket,port);
 
     if(setsockopt(listen_socket, SOL_SOCKET, SO_REUSEADDR, &rt, sizeof(int)) < 0){

@@ -1,3 +1,4 @@
+#define  _DEFAULT_SOURCE
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <netinet/in.h>
@@ -6,6 +7,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <endian.h>
 int const mb = 1048576;
 int get_file_size(char *filename) {
     struct stat *buffer;
@@ -17,11 +19,11 @@ void init_sock_addr(struct sockaddr_in *sock_addr, unsigned short server_port,ch
     //struct sockaddr_in sock_addr = *sock_addr_ptr;
     memset(sock_addr, 0, sizeof(sock_addr));
     sock_addr -> sin_family = AF_INET;
-    sock_addr -> sin_port = htons(server_port); // Note: htons for endiannes
+    sock_addr -> sin_port = htons(server_port);
     sock_addr -> sin_addr.s_addr = inet_addr(server_ip);
 }
 void send_n_to_server(uint64_t file_size,uint64_t N,int socket_fd){
-    N = htonl(file_size);
+    N = htobe64(file_size);
     char * N_buff = (char *)&N;
     int sent = 0;
     int curr_send;
@@ -33,7 +35,6 @@ void send_n_to_server(uint64_t file_size,uint64_t N,int socket_fd){
     }
 }
 void read_from_server(int socket_fd,char ** buffer_ptr){
-
     int current_read = 0;
     int totally_read = 0;
     while(sizeof(uint64_t ) > totally_read){
@@ -77,7 +78,7 @@ int main(int argc, char *argv[])
             perror("there was a problem reading the file");
             exit(1);
         }
-       int sent = 0;
+        int sent = 0;
         int curr_send = 0;
         while( mb > sent )
         {
@@ -90,11 +91,11 @@ int main(int argc, char *argv[])
     //read count of printable chars from server
     char * count_of_printable_chars_str = (char *)&response_size;
     read_from_server(socket_fd,&count_of_printable_chars_str);
-    response_size = ntohl(response_size);
+    response_size = be64toh(response_size);
     printf("# of printable characters: %u\n", response_size);
     close(socket_fd);
     exit(0);
 }
 //
 // Created by student on 5/27/22.
-//
+//vvv

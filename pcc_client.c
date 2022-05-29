@@ -10,14 +10,13 @@
 #include <endian.h>
 int const mb = 1048576;
 int get_file_size(char *filename) {
-    struct stat *buffer;
+    struct stat *buffer = malloc(sizeof *buffer);
     if (stat(filename, buffer) == 0)
         return buffer->st_size;
     return -2;
 }
 void init_sock_addr(struct sockaddr_in *sock_addr, unsigned short server_port,char* server_ip){
-    //struct sockaddr_in sock_addr = *sock_addr_ptr;
-    memset(sock_addr, 0, sizeof(sock_addr));
+    memset(sock_addr, 0, sizeof(*sock_addr));
     sock_addr -> sin_family = AF_INET;
     sock_addr -> sin_port = htons(server_port);
     sock_addr -> sin_addr.s_addr = inet_addr(server_ip);
@@ -49,7 +48,7 @@ int main(int argc, char *argv[])
     struct sockaddr_in sock_addr;
     FILE * fd;
     int  socket_fd = -1;
-    uint64_t file_size, N, response_size;
+    uint64_t file_size, N = 0, response_size;
 
     char * ip = argv[1];
     unsigned short port = atoi(argv[2]);
@@ -92,7 +91,7 @@ int main(int argc, char *argv[])
     char * count_of_printable_chars_str = (char *)&response_size;
     read_from_server(socket_fd,&count_of_printable_chars_str);
     response_size = be64toh(response_size);
-    printf("# of printable characters: %u\n", response_size);
+    printf("# of printable characters: %lu\n", response_size);
     close(socket_fd);
     exit(0);
 }
